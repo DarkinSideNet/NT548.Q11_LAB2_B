@@ -1,0 +1,63 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - echo Installing cfn-lint and Taskcat
+      - pip3 install --upgrade pip
+      - pip3 install cfn-lint taskcat
+  pre_build:
+    commands:
+      - echo Checking CloudFormation templates
+      - test -d cloudformation/templates && echo "Found cloudformation/templates" || (echo "Missing cloudformation/templates"; exit 1)
+  build:
+    commands:
+      - echo Linting CloudFormation templates
+      - |
+        if ls cloudformation/*.yml >/dev/null 2>&1; then
+          echo "Linting root YAML templates (excluding buildspec.yml)";
+          files=$(ls cloudformation/*.yml | grep -v 'buildspec.yml' || true)
+          if [ -n "$files" ]; then
+            cfn-lint $files || exit 1
+          else
+            echo "No root YAML CloudFormation templates to lint"
+          fi
+        fi
+      - |
+        if ls cloudformation/*.json >/dev/null 2>&1; then
+          echo "Linting root JSON templates";
+          cfn-lint cloudformation/*.json || exit 1;
+        fi
+      - |
+        if ls cloudformation/templates/*.yml >/dev/null 2>&1; then
+          echo "Linting nested YAML templates";
+          cfn-lint cloudformation/templates/*.yml || exit 1;
+        fi
+      - |
+        if ls cloudformation/templates/*.json >/dev/null 2>&1; then
+          echo "Linting nested JSON templates (excluding params-*.json)";
+          files=$(ls cloudformation/templates/*.json | grep -v -E 'params-.*\.json' || true)
+          if [ -n "$files" ]; then
+            cfn-lint $files || exit 1
+          else
+            echo "No nested JSON CloudFormation templates to lint"
+          fi
+        fi
+      - echo Running taskcat lint
+      - |
+        if [ -f cloudformation/templates/infra.yml ]; then
+          if [ "${STRICT_TASKCAT:-false}" = "true" ]; then
+            echo "Running taskcat lint (strict mode)"
+            taskcat lint -t cloudformation/templates/infra.yml || exit 1
+          else
+            echo "Running taskcat lint (non-blocking)"
+            taskcat lint -t cloudformation/templates/infra.yml || echo "Taskcat lint found issues (non-blocking)"
+          fi
+        else
+          echo "No infra.yml found for taskcat lint"
+        fi
+artifacts:
+  files:
+    - '**/*'
+  discard-paths: yes

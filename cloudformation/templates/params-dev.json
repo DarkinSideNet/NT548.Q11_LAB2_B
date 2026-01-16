@@ -1,0 +1,11 @@
+{
+  "Parameters": {
+    "VpcCidr": "10.0.0.0/16",
+    "PublicSubnetCidr": "10.0.1.0/24",
+    "PrivateSubnetCidr": "10.0.2.0/24",
+    "KeyName": "test_gpu",
+    "AmiId": "ami-0c398cb65a93047f2",
+    "InstanceType": "t3.micro",
+    "AllowedSshCidr": "0.0.0.0/0"
+  }
+}

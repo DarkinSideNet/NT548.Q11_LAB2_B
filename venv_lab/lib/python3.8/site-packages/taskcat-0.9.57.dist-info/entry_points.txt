@@ -1,0 +1,3 @@
+[console_scripts]
+taskcat=taskcat._cli:main
+

@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC (Public/Private), NAT Gateway, Route Tables, Security Groups, and EC2 instances
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for the public subnet
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR block for the private subnet
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI ID for EC2 instances
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+    Description: EC2 instance type
+  AllowedSshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR allowed to SSH to public EC2
+
+Mappings: {}
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet'
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-subnet'
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nat'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-rt'
+
+  PublicRouteDefault:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-rt'
+
+  PrivateRouteDefault:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH from AllowedSshCidr
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSshCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-sg'
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH from PublicSecurityGroup
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref PublicSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-sg'
+
+  PublicEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref PublicSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-ec2'
+
+  PrivateEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref PrivateSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-ec2'
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+  PrivateSubnetId:
+    Description: Private Subnet ID
+    Value: !Ref PrivateSubnet
+  PublicSgId:
+    Description: Public Security Group ID
+    Value: !Ref PublicSecurityGroup
+  PrivateSgId:
+    Description: Private Security Group ID
+    Value: !Ref PrivateSecurityGroup
+  PublicInstanceId:
+    Description: Public EC2 Instance ID
+    Value: !Ref PublicEC2
+  PrivateInstanceId:
+    Description: Private EC2 Instance ID
+    Value: !Ref PrivateEC2
