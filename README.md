@@ -39,6 +39,8 @@ git remote add origin "$REPO_URL"
 git add .
 git commit -m "Initial commit"
 git branch -M main
+git config --global credential.helper '!aws codecommit credential-helper $@'
+git config --global credential.UseHttpPath true
 git push -u origin main
 ```
 
